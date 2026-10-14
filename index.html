@@ -1,0 +1,432 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Angry Rabbits</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#17233c;color:white;font-family:Arial,sans-serif;text-align:center}
+header{padding:16px}
+h1{margin:5px;font-size:clamp(28px,5vw,44px)}
+header p{color:#c9d7ec}
+.hud{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin:15px}
+.hud span{background:#293b5d;padding:10px 16px;border-radius:10px}
+strong{color:#ffc15a}
+main{width:min(1000px,96%);margin:auto}
+canvas{display:block;width:100%;height:auto;border:3px solid #536b8e;border-radius:14px;touch-action:none}
+.controls{padding:15px}
+button{padding:11px 18px;border:0;border-radius:9px;background:#ffbd59;font-weight:bold;font-size:16px;cursor:pointer;margin:4px}
+button:hover{filter:brightness(1.1)}
+#message{min-height:24px;color:#d9e6fa}
+small{color:#aebed5}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐰 Angry Rabbits 🥕</h1>
+  <p>Launch rabbits, smash carrot towers, and defeat the hawks!</p>
+  <div class="hud">
+    <span>Score: <strong id="score">0</strong></span>
+    <span>Rabbits: <strong id="ammo">4</strong></span>
+    <span>Hawks: <strong id="hawks">3</strong></span>
+    <span>Level: <strong id="level">1</strong></span>
+  </div>
+</header>
+
+<main>
+  <canvas id="game" width="1000" height="560"></canvas>
+  <div class="controls">
+    <button id="restart">↻ Restart level</button>
+    <button id="next">Next level ➜</button>
+    <p id="message">Drag the rabbit backward and release to launch!</p>
+    <small>Mouse or touchscreen: drag and release. Press R to restart.</small>
+  </div>
+</main>
+
+<script>
+(() => {
+"use strict";
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const scoreText = document.getElementById("score");
+const ammoText = document.getElementById("ammo");
+const hawksText = document.getElementById("hawks");
+const levelText = document.getElementById("level");
+const message = document.getElementById("message");
+
+const W = canvas.width, H = canvas.height;
+const ground = 510;
+const sling = {x:165,y:420};
+const gravity = 0.34;
+let level = 0, score = 0, rabbitsLeft = 4;
+let rabbit, hawks = [], carrots = [];
+let dragging = false, won = false, lost = false;
+let lastTime = 0;
+
+const levels = [
+  {
+    ammo:4,
+    hawks:[[770,440],[865,440],[865,350]],
+    carrots:[[745,465],[795,465],[745,400],[795,400],[770,335]]
+  },
+  {
+    ammo:5,
+    hawks:[[740,440],[840,440],[930,440],[840,350]],
+    carrots:[[720,465],[765,465],[810,465],[855,465],[900,465],
+             [742,400],[787,400],[832,400],[877,400],[810,335]]
+  },
+  {
+    ammo:5,
+    hawks:[[735,440],[825,440],[915,440],[825,350],[870,260]],
+    carrots:[[715,465],[760,465],[805,465],[850,465],[895,465],
+             [737,400],[782,400],[827,400],[872,400],
+             [760,335],[805,335],[850,335],[805,270]]
+  }
+];
+
+function newRabbit() {
+  rabbit = {
+    x:sling.x,y:sling.y,r:18,
+    vx:0,vy:0,flying:false,alive:true
+  };
+}
+
+function setupLevel() {
+  const data = levels[level];
+  rabbitsLeft = data.ammo;
+  hawks = data.hawks.map(([x,y]) => ({
+    x,y,r:21,alive:true
+  }));
+  carrots = data.carrots.map(([x,y]) => ({
+    x,y,w:34,h:62,alive:true
+  }));
+  won = false;
+  lost = false;
+  dragging = false;
+  newRabbit();
+  message.textContent = "Drag the rabbit backward and release to launch!";
+  updateHUD();
+}
+
+function updateHUD() {
+  scoreText.textContent = score;
+  ammoText.textContent = rabbitsLeft;
+  hawksText.textContent = hawks.filter(h => h.alive).length;
+  levelText.textContent = level + 1;
+}
+
+function pointerPosition(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x:(e.clientX-rect.left)*W/rect.width,
+    y:(e.clientY-rect.top)*H/rect.height
+  };
+}
+
+canvas.addEventListener("pointerdown", e => {
+  if (!rabbit || !rabbit.alive || rabbit.flying || won || lost) return;
+  const p = pointerPosition(e);
+  if (Math.hypot(p.x-rabbit.x,p.y-rabbit.y)<rabbit.r+12) {
+    dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+  }
+});
+
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const p = pointerPosition(e);
+  let dx = p.x-sling.x, dy = p.y-sling.y;
+  const distance = Math.hypot(dx,dy);
+  const maxPull = 95;
+  if (distance > maxPull) {
+    dx = dx/distance*maxPull;
+    dy = dy/distance*maxPull;
+  }
+  rabbit.x = sling.x+dx;
+  rabbit.y = sling.y+dy;
+});
+
+canvas.addEventListener("pointerup", () => {
+  if (!dragging) return;
+  dragging = false;
+  const dx = sling.x-rabbit.x;
+  const dy = sling.y-rabbit.y;
+  if (Math.hypot(dx,dy)<8) {
+    rabbit.x=sling.x;
+    rabbit.y=sling.y;
+    return;
+  }
+  rabbit.vx = dx*0.19;
+  rabbit.vy = dy*0.19;
+  rabbit.flying = true;
+  rabbitsLeft = Math.max(0,rabbitsLeft-1);
+  message.textContent = "Nice shot! Hit the hawks and carrots!";
+  updateHUD();
+});
+
+document.getElementById("restart").addEventListener("click", () => {
+  score=0;
+  setupLevel();
+});
+
+document.getElementById("next").addEventListener("click", () => {
+  level=(level+1)%levels.length;
+  score=0;
+  setupLevel();
+});
+
+window.addEventListener("keydown", e => {
+  if (e.key.toLowerCase()==="r") {
+    score=0;
+    setupLevel();
+  }
+});
+
+function circleHit(a,b) {
+  return Math.hypot(a.x-b.x,a.y-b.y)<a.r+b.r;
+}
+
+function circleRect(c,r) {
+  const x=Math.max(r.x,Math.min(c.x,r.x+r.w));
+  const y=Math.max(r.y,Math.min(c.y,r.y+r.h));
+  return Math.hypot(c.x-x,c.y-y)<c.r;
+}
+
+function hitTargets() {
+  if (!rabbit || !rabbit.flying || !rabbit.alive) return;
+
+  for (const h of hawks) {
+    if (h.alive && circleHit(rabbit,h)) {
+      h.alive=false;
+      score+=100;
+      rabbit.vx*=0.8;
+      rabbit.vy*=0.8;
+    }
+  }
+
+  for (const c of carrots) {
+    if (c.alive && circleRect(rabbit,c)) {
+      c.alive=false;
+      score+=15;
+      rabbit.vx*=0.78;
+      rabbit.vy-=1.5;
+    }
+  }
+  updateHUD();
+}
+
+function update(dt) {
+  if (rabbit && rabbit.flying && rabbit.alive) {
+    const steps=Math.max(1,Math.ceil(dt/16));
+    for (let i=0;i<steps;i++) {
+      rabbit.vy+=gravity;
+      rabbit.vx*=0.997;
+      rabbit.x+=rabbit.vx;
+      rabbit.y+=rabbit.vy;
+    }
+    hitTargets();
+
+    if (rabbit.y>H+60 || rabbit.x>W+60 ||
+        rabbit.x<-60 || rabbit.y>ground-10) {
+      rabbit.alive=false;
+    }
+
+    if (Math.abs(rabbit.vx)<0.25 &&
+        Math.abs(rabbit.vy)<0.5) {
+      rabbit.alive=false;
+    }
+  }
+
+  const remaining=hawks.filter(h=>h.alive).length;
+
+  if (remaining===0 && !won) {
+    won=true;
+    message.textContent="🎉 Level cleared! Click Next level!";
+  } else if (rabbit && !rabbit.alive && !dragging && !won && !lost) {
+    if (rabbitsLeft>0) {
+      newRabbit();
+    } else {
+      lost=true;
+      message.textContent="Out of rabbits! Restart and try again.";
+    }
+  }
+}
+
+function background() {
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#82d5fa");
+  sky.addColorStop(1,"#e3f7ff");
+  ctx.fillStyle=sky;
+  ctx.fillRect(0,0,W,H);
+
+  // Clouds
+  ctx.fillStyle="#ffffffb9";
+  [[100,90,28],[135,85,36],[170,93,25],
+   [670,110,27],[705,100,35],[740,110,24]].forEach(([x,y,r])=>{
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  });
+
+  // Hills
+  ctx.fillStyle="#9bce81";
+  ctx.beginPath();
+  ctx.moveTo(0,430);
+  ctx.quadraticCurveTo(240,350,450,430);
+  ctx.quadraticCurveTo(700,350,1000,420);
+  ctx.lineTo(1000,H);ctx.lineTo(0,H);ctx.fill();
+
+  // Ground
+  ctx.fillStyle="#69b65e";
+  ctx.fillRect(0,ground,W,H-ground);
+  ctx.fillStyle="#438b47";
+  ctx.fillRect(0,ground,W,7);
+}
+
+function drawSlingshot() {
+  ctx.lineCap="round";
+  ctx.strokeStyle="#79502d";
+  ctx.lineWidth=13;
+  ctx.beginPath();
+  ctx.moveTo(sling.x,490);
+  ctx.lineTo(sling.x,410);
+  ctx.lineTo(sling.x-18,383);
+  ctx.moveTo(sling.x,410);
+  ctx.lineTo(sling.x+18,383);
+  ctx.stroke();
+
+  ctx.strokeStyle="#e7b56f";
+  ctx.lineWidth=5;
+  ctx.beginPath();
+  ctx.moveTo(sling.x-18,383);
+  ctx.lineTo(rabbit && !rabbit.flying ? rabbit.x:sling.x,
+             rabbit && !rabbit.flying ? rabbit.y:sling.y);
+  ctx.lineTo(sling.x+18,383);
+  ctx.stroke();
+}
+
+function drawRabbit(r) {
+  if (!r || !r.alive) return;
+  ctx.save();
+  ctx.translate(r.x,r.y);
+
+  // Ears
+  ctx.fillStyle="#fff7ee";
+  ctx.beginPath();
+  ctx.ellipse(-7,-17,6,16,-0.2,0,Math.PI*2);
+  ctx.ellipse(7,-17,6,16,0.2,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#f3a4bd";
+  ctx.beginPath();
+  ctx.ellipse(-7,-17,2.5,10,-0.2,0,Math.PI*2);
+  ctx.ellipse(7,-17,2.5,10,0.2,0,Math.PI*2);
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle="#fffaf3";
+  ctx.beginPath();ctx.arc(0,0,r.r,0,Math.PI*2);ctx.fill();
+
+  // Eye and nose
+  ctx.fillStyle="#263348";
+  ctx.beginPath();ctx.arc(6,-4,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#f3a4bd";
+  ctx.beginPath();ctx.arc(11,4,3,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+
+function drawCarrot(c) {
+  if (!c.alive) return;
+  ctx.save();
+  ctx.translate(c.x+c.w/2,c.y+c.h/2);
+
+  ctx.fillStyle="#ff8a2b";
+  ctx.beginPath();
+  ctx.moveTo(-c.w/2,-c.h/2);
+  ctx.lineTo(c.w/2,-c.h/2);
+  ctx.lineTo(2,c.h/2);
+  ctx.closePath();ctx.fill();
+
+  ctx.strokeStyle="#d9641e";ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(-8,-8);ctx.lineTo(7,-4);
+  ctx.moveTo(-6,9);ctx.lineTo(5,12);
+  ctx.stroke();
+
+  ctx.fillStyle="#329b52";
+  ctx.beginPath();
+  ctx.ellipse(-5,-c.h/2-5,5,10,-0.6,0,Math.PI*2);
+  ctx.ellipse(5,-c.h/2-6,5,10,0.6,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHawk(h) {
+  if (!h.alive) return;
+  ctx.save();
+  ctx.translate(h.x,h.y);
+
+  ctx.fillStyle="#53617a";
+  ctx.beginPath();ctx.ellipse(0,0,22,17,0,0,Math.PI*2);ctx.fill();
+
+  ctx.fillStyle="#394760";
+  ctx.beginPath();
+  ctx.ellipse(-17,-5,14,7,-0.5,0,Math.PI*2);
+  ctx.ellipse(17,-5,14,7,0.5,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="white";
+  ctx.beginPath();ctx.arc(7,-4,5,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#172033";
+  ctx.beginPath();ctx.arc(9,-4,2,0,Math.PI*2);ctx.fill();
+
+  ctx.fillStyle="#ffbf45";
+  ctx.beginPath();
+  ctx.moveTo(17,1);ctx.lineTo(29,5);ctx.lineTo(17,8);
+  ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  background();
+
+  // Bushes
+  ctx.fillStyle="#4b9a50";
+  for(let x=25;x<W;x+=115){
+    ctx.beginPath();
+    ctx.arc(x,ground+4,17,Math.PI,Math.PI*2);
+    ctx.fill();
+  }
+
+  drawSlingshot();
+  carrots.forEach(drawCarrot);
+  hawks.forEach(drawHawk);
+  drawRabbit(rabbit);
+
+  if (won || lost) {
+    ctx.fillStyle="#10203bdb";
+    ctx.fillRect(245,195,510,105);
+    ctx.fillStyle="white";
+    ctx.textAlign="center";
+    ctx.font="bold 32px Arial";
+    ctx.fillText(won?"LEVEL CLEARED!":"TRY AGAIN!",W/2,237);
+    ctx.font="18px Arial";
+    ctx.fillText(won?"Click Next level to continue":"Click Restart level to retry",W/2,272);
+  }
+}
+
+function loop(time) {
+  const dt=lastTime?Math.min(34,time-lastTime):16;
+  lastTime=time;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+setupLevel();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
